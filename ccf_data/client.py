@@ -85,9 +85,20 @@ def _norm_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 class _Cascades:
-    """Cross-year media cascade analysis (cascades = bursts of correlated coverage).
+    """Cross-year media cascade analysis. Access via ``ccf.cascades``.
 
-    Access via `ccf.cascades`.
+    Cascades model bursts of correlated coverage across newspapers — each
+    cascade has a frame, a classification, scores (temporal /
+    participation / convergence / source / total), participating
+    journalists and outlets, and time-resolved network edges.
+
+    **Tier required for every method in this namespace: ``researcher``.**
+
+    Methods
+    -------
+    summary, year, detail, events, event_detail, network, year_network,
+    paradigm_shifts, convergence, time_series, impact, cross_year,
+    cross_year_all, paradigm_timeline, search, semantic_search.
     """
 
     def __init__(self, http: _HTTP):
@@ -182,7 +193,20 @@ class _Cascades:
 
 
 class _Events:
-    """Cross-year event-cluster analysis. Access via `ccf.events`."""
+    """Cross-year event-cluster analysis. Access via ``ccf.events``.
+
+    Event clusters group together occurrences of similar events
+    (extreme weather, summits, elections, judiciary decisions, …)
+    across multiple newspapers and dates. Each cluster has a dominant
+    type, a strength score, NER entities, and the underlying article IDs.
+
+    **Tier required for every method in this namespace: ``researcher``.**
+
+    Methods
+    -------
+    summary, clusters, cluster, cluster_articles, type_network,
+    search, semantic_search.
+    """
 
     def __init__(self, http: _HTTP):
         self._http = http
@@ -282,38 +306,84 @@ class CCF:
         return self._http.last_status
 
     def me(self) -> Dict[str, Any]:
-        """Account info + tier + remaining quotas. Hits /auth/me."""
+        """Return account info, tier, and remaining quotas for the current token.
+
+        Hits ``GET /auth/me``. The response includes ``username``, ``role``,
+        ``tier``, ``tier_description``, and a ``quota`` block with
+        ``requests`` / ``searches`` / ``exports`` (each with ``used_today``,
+        ``used_total``, ``max_day``, ``max_total``).
+
+        Tier: not required (any authenticated token).
+
+        >>> ccf.me()['quota']['requests']['used_today']
+        17
+        """
         return self._http.get('/auth/me')
 
     def tiers(self) -> Dict[str, Any]:
-        """Public listing of all tiers + their default quotas. /auth/tiers."""
+        """Public listing of all tiers + their default quotas (``GET /auth/tiers``).
+
+        Tier: not required (no authentication needed in fact).
+
+        >>> ccf.tiers()['default_minimum']
+        'researcher'
+        """
         return self._http.get('/auth/tiers')
 
     # ------------------------------------------------------------------
-    # Static / aggregate data
+    # Static / aggregate data (tier: metadata)
     # ------------------------------------------------------------------
     def summary(self) -> Dict[str, Any]:
-        """Corpus-level stats: total articles, sentences, frames, annotation totals."""
+        """Corpus-level statistics: totals, date range, frames, annotation counts.
+
+        Tier: ``metadata``. Hits ``GET /api/summary``.
+
+        >>> s = ccf.summary()
+        >>> s['total_articles'], s['total_sentences']
+        (266271, 9198958)
+        """
         return self._http.get('/api/summary')
 
     def schema(self) -> Dict[str, Any]:
-        """Server-side annotation schema (frames, subcategories, columns)."""
+        """Server-side annotation schema (frames, subcategories, columns,
+        media list, allowed group_by values).
+
+        Tier: ``metadata``. Hits ``GET /api/schema``.
+        """
         return self._http.get('/api/schema')
 
     def geo_data(self) -> Dict[str, Any]:
-        """Pre-computed geographic aggregates by Canadian province."""
+        """Pre-computed per-province aggregates: articles, frames, events,
+        tone, strategy, entities, cascades, and media-by-province mapping.
+
+        Tier: ``metadata``. Hits ``GET /api/geo-data``.
+        """
         return self._http.get('/api/geo-data')
 
     def articles_by_year(self, raw: bool = False):
+        """Article counts by year as a DataFrame (year, count).
+
+        Tier: ``metadata``. Hits ``GET /api/articles-by-year``.
+
+        Pass ``raw=True`` to receive the underlying list of dicts.
+        """
         rows = self._http.get('/api/articles-by-year')
         return _to_df(rows, raw=raw)
 
     def articles_by_media(self, raw: bool = False):
+        """Article counts by media outlet as a DataFrame (media, count).
+
+        Tier: ``metadata``. Hits ``GET /api/articles-by-media``.
+        """
         rows = self._http.get('/api/articles-by-media')
         return _to_df(rows, raw=raw)
 
     def frame_trends(self, raw: bool = False):
-        """Monthly frame coverage (precomputed view)."""
+        """Pre-computed monthly frame coverage (one row per month with
+        per-frame counts).
+
+        Tier: ``metadata``. Hits ``GET /api/frame-trends``.
+        """
         rows = self._http.get('/api/frame-trends')
         return _to_df(rows, raw=raw)
 
@@ -324,13 +394,24 @@ class CCF:
                      lang: Optional[str] = None, media: Optional[str] = None,
                      date_from: Optional[str] = None, date_to: Optional[str] = None,
                      raw: bool = False):
-        """Aggregate annotation counts grouped by year/month/media/language.
+        """Aggregate annotation counts grouped by year / month / media / language.
+
+        Tier: ``analyst``. Hits ``GET /api/distribution``.
 
         Parameters
         ----------
-        columns : list of column names from `ALL_ANNOTATION_COLUMNS`
-        group_by : 'year' | 'month' | 'media' | 'language'
-        lang, media, date_from, date_to : optional filters
+        columns : list of column names from ``ALL_ANNOTATION_COLUMNS``
+        group_by : ``'year'`` | ``'month'`` | ``'media'`` | ``'language'``
+        lang : optional language filter (``'en'`` / ``'fr'`` — case-insensitive)
+        media : optional single media-outlet filter
+        date_from, date_to : ISO date strings
+        raw : if True return the raw response dict
+
+        >>> ccf.distribution(['economic_frame', 'health_frame'],
+        ...                  group_by='year', lang='en')
+            year  economic_frame  health_frame  sentence_count
+        0   1978               0             0              11
+        ...
         """
         if group_by not in ('year', 'month', 'media', 'language'):
             raise CCFBadRequest("group_by must be one of: year, month, media, language")
@@ -398,36 +479,70 @@ class CCF:
                filter_timing: str = 'pre', hybrid_weight: float = 0.5,
                page_size: int = 100, limit: Optional[int] = None,
                raw: bool = False):
-        """Unified search endpoint (POST /api/search/advanced).
+        """Unified search over the CCF corpus (``POST /api/search/advanced``).
+
+        Tier: ``researcher``. This is the workhorse method — it covers
+        full-text, keyword, semantic, hybrid, entity, and browse searches at
+        either sentence or article granularity. Auto-paginates results.
 
         Parameters
         ----------
         query : str
-            Search text. Use ``'*'`` or empty to enter "browse" mode.
-        level : 'sentence' | 'article'
-            Whether to return individual sentences or article-level aggregates.
-        mode : 'text' | 'keyword' | 'semantic' | 'hybrid' | 'entity' | 'browse'
-                | 'cascade_xref' | 'event_xref'
-            'text' uses Postgres FTS with stemming. 'keyword' is exact ILIKE.
-            'semantic' is FAISS dense retrieval. 'hybrid' blends both.
-            'entity' searches NER fields. 'browse' lists results without query.
+            Search text. Use ``'*'`` or empty to enter ``browse`` mode.
+        level : str
+            ``'sentence'`` (default) returns one row per matching sentence with
+            highlighted ``headline``; ``'article'`` aggregates per ``doc_id``
+            with frame percentages and matching counts.
+        mode : str
+            - ``'text'``: Postgres full-text search (language-aware stemming).
+            - ``'keyword'``: exact ``ILIKE`` substring match (no stemming).
+            - ``'semantic'``: FAISS dense retrieval over BAAI/bge-m3 embeddings.
+            - ``'hybrid'``: blend of FTS + semantic (``hybrid_weight``).
+            - ``'entity'``: search inside the NER fields (``ner_entities``).
+            - ``'browse'``: list results without a query (apply filters only).
+            - ``'cascade_xref'`` / ``'event_xref'``: results limited to those
+              overlapping with cascades / event clusters.
         filters : dict, optional
-            Server-side filters (e.g. ``{'lang': 'en', 'media': ['Globe and Mail'],
-            'date_from': '2010-01-01', 'frames': ['economic'], 'tone': 'negative'}``).
+            Server-side filters. Useful keys:
+
+            - ``lang`` (``'en'`` / ``'fr'``, case-insensitive)
+            - ``media`` (string or list of media outlets — see ``MEDIA_OUTLETS``)
+            - ``date_from`` / ``date_to`` (ISO date strings)
+            - ``frames`` (list, e.g. ``['economic', 'environmental']``)
+            - ``tone`` (``'positive'`` / ``'negative'`` / ``'neutral'``)
+            - ``subcategories`` / ``messenger_subs`` / ``event_subs`` /
+              ``solutions`` (lists of column names)
+            - ``front_page`` (bool), ``urgency`` / ``canada`` (0/1),
+              ``news_type``, ``author``, ``words_count_min/max``
+            - ``province`` (Canadian province; auto-translated to media list)
         thresholds : list of dict
-            Annotation-percentage thresholds per article, e.g.
-            ``[{'column': 'economic_frame', 'min_pct': 0.3}]``.
-        filter_timing : 'pre' | 'post'
-            'pre' applies filters during the SQL query (faster); 'post' fetches
-            a wider result and filters in-memory (more flexible).
+            Per-article annotation-percentage thresholds, e.g.
+            ``[{'column': 'economic_frame', 'min_pct': 0.3}]`` keeps
+            articles whose AVG(economic_frame) ≥ 30 %.
+        filter_timing : str
+            ``'pre'`` (default) applies filters during the SQL query
+            (faster); ``'post'`` fetches a wider result set and applies
+            annotation filters in-memory (more flexible at the cost of
+            extra rows fetched).
+        hybrid_weight : float in [0, 1]
+            Mix between semantic (1.0) and FTS (0.0) when ``mode='hybrid'``.
         page_size : int
-            Server page size; auto-paginates by default.
+            Server page size; auto-paginates until ``limit`` is reached.
         limit : int or None
-            Stop after this many rows (None = fetch all).
+            Cap rows returned. ``None`` = fetch every page.
+        raw : bool
+            If True return ``{'rows': [...], 'last_response': {...}}``
+            instead of a DataFrame.
 
         Returns
         -------
-        pandas.DataFrame (when raw=False) or list of dicts.
+        pandas.DataFrame (default) or dict (``raw=True``).
+
+        >>> df = ccf.search('carbon tax', level='sentence',
+        ...                 filters={'lang': 'en', 'media': ['Globe and Mail']},
+        ...                 limit=200)
+        >>> df.columns.tolist()[:6]
+        ['doc_id', 'sentence_id', 'title', 'author', 'media', 'pub_date']
         """
         from ._pagination import _paginate_post
         body_template: Dict[str, Any] = {
@@ -458,8 +573,38 @@ class CCF:
                       max_rows: int = 50_000, mode: str = 'text',
                       include_search_params: bool = False,
                       to_dataframe: bool = True):
-        """Server-side CSV export. Returns DataFrame by default; pass
-        ``to_dataframe=False`` to get raw CSV bytes."""
+        """Server-side CSV export of a search query. Returns a DataFrame by
+        default; pass ``to_dataframe=False`` to get raw CSV bytes.
+
+        Tier: ``expert``. Hits ``POST /api/search/export``. The export
+        endpoint enforces a per-token export quota in addition to the
+        normal request quota, so exports also count against
+        ``last_status.exports_remaining``.
+
+        Parameters
+        ----------
+        query : str
+            Search text (uses Postgres FTS regardless of `mode`).
+        filters : dict
+            Same keys as :py:meth:`search`.
+        columns : list of str, optional
+            Restrict the CSV to these columns
+            (see ``EXPORT_COLUMNS_WHITELIST`` server-side).
+        max_rows : int, default 50_000
+            Server-side cap on rows.
+        mode : str
+            Logged with the export but does not change the SQL strategy.
+        include_search_params : bool
+            Prepend a ``# Query:`` comment block at the top of the CSV.
+        to_dataframe : bool
+            If True (default) parse the CSV with pandas and return a DataFrame;
+            otherwise return raw bytes (suitable for ``open('out.csv','wb')``).
+
+        >>> df = ccf.search_export('carbon tax',
+        ...     filters={'lang': 'en'},
+        ...     columns=['doc_id', 'sentence_text', 'pub_date',
+        ...              'media', 'dominant_frame'])
+        """
         body = {
             'query': query, 'filters': _norm_filters(filters), 'mode': mode,
             'max_rows': int(max_rows),
@@ -502,11 +647,30 @@ class CCF:
     # Articles (researcher tier)
     # ------------------------------------------------------------------
     def article(self, doc_id: int) -> Dict[str, Any]:
-        """Full article: metadata + all sentences + per-sentence annotations."""
+        """Fetch a full article by ``doc_id``: metadata + every sentence +
+        per-sentence annotation columns.
+
+        Tier: ``researcher``. Hits ``GET /api/article/<doc_id>``.
+
+        Viewer accounts (different from the tier system) have a per-account
+        article-view quota; once exhausted, sentences come back with
+        ``sentence_text=''`` and the response carries
+        ``viewer_limit_reached=True``. Tier-based tokens are not affected.
+
+        >>> art = ccf.article(123456)
+        >>> art['title'], len(art['sentences'])
+        ('Drive in Alberta...', 30)
+        """
         return self._http.get(f'/api/article/{int(doc_id)}')
 
     def articles_batch(self, doc_ids: Iterable[int], raw: bool = False):
-        """Batch-fetch article metadata (no sentences). Faster than N calls."""
+        """Batch-fetch article metadata (without sentences) for a list of IDs.
+
+        Tier: ``researcher``. Hits ``POST /api/articles/batch``. Returns a
+        DataFrame with ``doc_id, title, media, date, author``. Much faster
+        than N individual :py:meth:`article` calls when you only need
+        metadata.
+        """
         resp = self._http.post('/api/articles/batch',
                                json={'doc_ids': [int(d) for d in doc_ids]})
         return resp if raw else _to_df(resp.get('articles', []))
@@ -516,10 +680,43 @@ class CCF:
     # ------------------------------------------------------------------
     @staticmethod
     def define(column: str) -> str:
-        """Operational definition of an annotation column."""
+        """Operational definition of an annotation column.
+
+        Tier: not required (offline lookup against the embedded codebook).
+        """
         return _schema.define(column)
 
     @staticmethod
     def codebook_dataframe():
-        """Full codebook as a tidy pandas DataFrame."""
+        """Full codebook as a tidy pandas DataFrame.
+
+        Tier: not required (offline).
+        """
         return _schema.codebook_dataframe()
+
+    # ------------------------------------------------------------------
+    # Tier introspection (no HTTP — local)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def tier_required(method_name: str):
+        """Return the minimum tier required to call a given method, or None
+        for offline helpers. Useful before issuing a call:
+
+        >>> CCF.tier_required('search_export')
+        'expert'
+        """
+        from . import tiers as _tiers
+        return _tiers.tier_required(method_name)
+
+    @staticmethod
+    def methods_by_tier(tier: str, *, exact: bool = False):
+        """List methods callable at a given tier.
+
+        Pass ``exact=True`` to get only methods whose minimum tier is exactly
+        ``tier`` (excluding lower-tier methods that are also callable).
+
+        >>> CCF.methods_by_tier('expert', exact=True)
+        ['search_export']
+        """
+        from . import tiers as _tiers
+        return _tiers.methods_by_tier(tier, exact=exact)

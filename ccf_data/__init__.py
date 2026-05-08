@@ -17,6 +17,10 @@ from .schema import (
     ALL_ANNOTATION_COLUMNS, MEDIA_OUTLETS, LANGUAGES,
     define, subcategories_of, codebook_dataframe,
 )
+from .tiers import (
+    TIERS, TIER_DESCRIPTIONS, METHOD_TIERS,
+    tier_required, methods_by_tier, tier_at_least,
+)
 
 __version__ = "0.1.0"
 
@@ -28,4 +32,6 @@ __all__ = [
     "MESSENGERS", "EVENTS", "SOLUTIONS", "TONES", "OTHER",
     "ALL_ANNOTATION_COLUMNS", "MEDIA_OUTLETS", "LANGUAGES",
     "define", "subcategories_of", "codebook_dataframe",
+    "TIERS", "TIER_DESCRIPTIONS", "METHOD_TIERS",
+    "tier_required", "methods_by_tier", "tier_at_least",
 ]

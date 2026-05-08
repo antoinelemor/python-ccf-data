@@ -1,7 +1,7 @@
 # ccf-data — Python client for the Canadian Climate Framing API
 
-Authenticated, tibble-friendly access to the Canadian Climate Framing (CCF)
-data platform: a corpus of ~250,000 Canadian newspaper articles
+Authenticated, DataFrame-friendly access to the Canadian Climate Framing
+(CCF) data platform: a corpus of ~250,000 Canadian newspaper articles
 (1978–2024), 9.2 M sentences, and 67 climate-coverage annotations
 (framings, messengers, events, solutions, tone, named entities).
 
@@ -45,23 +45,18 @@ assigned by an administrator when the token is created and dictates
 both *which* endpoints the token may call and *how many* requests it
 can issue per day.
 
-| Tier         | Default req/day | Endpoints unlocked                                              |
-|--------------|----------------:|-----------------------------------------------------------------|
-| `metadata`   | 1 000           | summary, schema, geo, articles-by-year/media, frame-trends      |
-| `analyst`    | 5 000           | + distributions, trends, cross-tab, subcategory/messenger/event/solution analyses |
-| `researcher` | 20 000          | + search/article/articles batch, all cascades + events, semantic search |
-| `expert`     | unlimited       | + CSV exports                                                   |
-| `writer`     | unlimited       | + admin endpoints (used for internal tools)                     |
+| Tier         | Default req/day | Default search/day | Default export/day | Unlocks                                               |
+|--------------|----------------:|-------------------:|-------------------:|-------------------------------------------------------|
+| `metadata`   |           1 000 |                  — |                  — | summary, schema, geo, articles-by-*, frame-trends     |
+| `analyst`    |           5 000 |                100 |                  — | + distributions, trends, cross-tab, *_analysis        |
+| `researcher` |          20 000 |              1 000 |                 20 | + search/article/cascades/events/semantic             |
+| `expert`     |       unlimited |          unlimited |          unlimited | + CSV exports                                         |
+| `writer`     |       unlimited |          unlimited |          unlimited | + admin endpoints (internal tooling)                  |
 
-Two extra search-specific quotas (`searches/day`, `exports/day`) layer on
-top. When you call any `/api/*` endpoint the server returns these
-`X-CCF-*` response headers — accessible via `ccf.last_status`:
-
-```python
-ccf.summary()
-ccf.last_status   # TierStatus(tier='researcher',
-                  #            requests_remaining=19999, ...)
-```
+These quotas are stored per-token; an admin can override any of them.
+After every call the client stashes `tier`, `requests_remaining`,
+`searches_remaining`, `exports_remaining` from the `X-CCF-*` response
+headers — accessible via `ccf.last_status`.
 
 When a quota is exhausted you get a `CCFQuotaError`; when your tier is
 too low you get a `CCFTierError`. Catch them by class:
@@ -76,17 +71,126 @@ except CCFQuotaError as e:
     print(f"Quota '{e.reason}' hit on tier '{e.tier}'")
 ```
 
-## Quick tour
-
-### Corpus stats and schema
+You can introspect tiers offline:
 
 ```python
-ccf.summary()                 # totals, frame counts, date range
-ccf.schema()                  # server-side annotation schema
-ccf.codebook                  # offline dict — operational definitions
-CCF.define('eco_neg_impact')  # a single column's definition
-CCF.codebook_dataframe()      # full codebook as a DataFrame
+from ccf_data import CCF, methods_by_tier, tier_required, TIER_DESCRIPTIONS
+
+CCF.tier_required('search_export')        # 'expert'
+CCF.tier_required('search')               # 'researcher'
+methods_by_tier('analyst', exact=True)    # only analyst-tier methods
+TIER_DESCRIPTIONS['expert']               # one-line description
 ```
+
+## All methods at a glance
+
+Methods are listed below with their endpoint, minimum tier, and what
+they do. *Offline* helpers don't hit the network and don't require a
+token at all (the codebook is bundled with the package).
+
+### Identity & quota introspection
+
+| Method                | HTTP                       | Tier      | Description |
+|-----------------------|----------------------------|-----------|-------------|
+| `ccf.me()`            | GET /auth/me               | metadata  | Username, role, tier, quota usage. |
+| `ccf.tiers()`         | GET /auth/tiers            | metadata  | Public listing of all tiers + default quotas. |
+| `ccf.last_status`     | (no HTTP — last call)      | —         | TierStatus from the most recent response headers. |
+
+### Aggregate / static data — tier `metadata`
+
+| Method                          | HTTP                          | Description |
+|---------------------------------|-------------------------------|-------------|
+| `ccf.summary()`                 | GET /api/summary              | Corpus totals (articles, sentences, frames, annotation totals). |
+| `ccf.schema()`                  | GET /api/schema               | Server-side annotation schema. |
+| `ccf.geo_data()`                | GET /api/geo-data             | Per-province aggregates (frames, events, tone, entities). |
+| `ccf.articles_by_year()`        | GET /api/articles-by-year     | DataFrame with one row per year. |
+| `ccf.articles_by_media()`       | GET /api/articles-by-media    | DataFrame with one row per media outlet. |
+| `ccf.frame_trends()`            | GET /api/frame-trends         | Pre-computed monthly frame coverage. |
+
+### Distributions / analyses — tier `analyst`
+
+| Method                            | HTTP                              | Description |
+|-----------------------------------|-----------------------------------|-------------|
+| `ccf.distribution(...)`           | GET /api/distribution             | Annotation counts grouped by year/month/media/language. |
+| `ccf.subcategory_detail(frame)`   | GET /api/subcategory-detail       | Totals + monthly trend for a frame's subcategories. |
+| `ccf.messenger_analysis(...)`     | GET /api/messenger-analysis       | Messenger column totals + monthly trend. |
+| `ccf.event_analysis(...)`         | GET /api/event-analysis           | Event column totals + monthly trend. |
+| `ccf.solution_analysis(...)`      | GET /api/solution-analysis        | Solution column totals + monthly trend. |
+| `ccf.tone_trends(...)`            | GET /api/tone-trends              | Monthly positive/negative/neutral counts. |
+| `ccf.urgency_trends(...)`         | GET /api/urgency-trends           | Monthly urgency-flag counts. |
+| `ccf.canada_coverage(...)`        | GET /api/canada-coverage          | Monthly Canada-mention counts. |
+| `ccf.cross_tabulation(r, c)`      | POST /api/cross-tabulation        | 2×2 contingency table of two binary columns. |
+
+### Search & articles — tier `researcher`
+
+| Method                                  | HTTP                              | Description |
+|-----------------------------------------|-----------------------------------|-------------|
+| `ccf.search(query, ...)`                | POST /api/search/advanced         | Unified search (text / keyword / semantic / hybrid / entity / browse / *_xref) at sentence or article level. Auto-paginates. |
+| `ccf.search_summary(query)`             | POST /api/search/summary          | Aggregate stats for a query (year + media distribution, frame breakdown). |
+| `ccf.threshold_filter(doc_ids, col)`    | POST /api/search/threshold-filter | Among `doc_ids`, keep those whose AVG(col) ≥ min_pct. |
+| `ccf.cascade_xref(query)`               | POST /api/search/cascade-xref     | Cascades whose articles overlap with this search. |
+| `ccf.event_xref(query)`                 | POST /api/search/event-xref       | Event clusters whose articles overlap with this search. |
+| `ccf.semantic_search(query, k)`         | POST /api/semantic-search         | FAISS-only dense retrieval (no FTS). |
+| `ccf.article(doc_id)`                   | GET /api/article/&lt;doc_id&gt;   | Full article (metadata + every sentence + annotations). |
+| `ccf.articles_batch([doc_ids])`         | POST /api/articles/batch          | Metadata-only batch fetch (much faster than N article calls). |
+
+### Cascades sub-namespace — tier `researcher`
+
+Access via `ccf.cascades.<method>`. All methods require tier `researcher`.
+
+| Method                                                 | HTTP                                              | Description |
+|--------------------------------------------------------|---------------------------------------------------|-------------|
+| `cascades.summary()`                                   | GET /api/cascades/summary                         | Cross-year cascade counts and metadata. |
+| `cascades.year(year)`                                  | GET /api/cascades/&lt;year&gt;                    | All cascades for one year. |
+| `cascades.detail(year, cascade_id)`                    | GET /api/cascades/&lt;year&gt;/&lt;cid&gt;        | Full cascade record (scores, journalists, media, events). |
+| `cascades.events(year)`                                | GET /api/cascades/&lt;year&gt;/events             | Year's event clusters as a DataFrame. |
+| `cascades.event_detail(year, cluster_id)`              | GET /api/cascades/&lt;year&gt;/events/&lt;id&gt;  | One year-bound event cluster. |
+| `cascades.network(year, cascade_id)`                   | GET /api/cascades/&lt;year&gt;/network/&lt;cid&gt;| Network edges for a single cascade. |
+| `cascades.year_network(year, ...)`                     | GET /api/cascades/&lt;year&gt;/network            | Whole-year edge list, filterable. |
+| `cascades.paradigm_shifts(year)`                       | GET /api/cascades/&lt;year&gt;/paradigm-shifts    | Paradigm-shift episodes for a year. |
+| `cascades.convergence(year)`                           | GET /api/cascades/&lt;year&gt;/convergence        | Year's convergence statistics. |
+| `cascades.time_series(year)`                           | GET /api/cascades/&lt;year&gt;/time-series        | Daily articles / journalists / signals tables. |
+| `cascades.impact(year)`                                | GET /api/cascades/&lt;year&gt;/impact             | Year's impact summary. |
+| `cascades.cross_year(page, page_size)`                 | GET /api/cascades/cross-year                      | One page of the cross-year cascade table. |
+| `cascades.cross_year_all()`                            | GET /api/cascades/cross-year/all                  | Slim metadata for every cascade across all years. |
+| `cascades.paradigm_timeline()`                         | GET /api/cascades/cross-year/paradigm-timeline    | Cross-year paradigm-shift timeline. |
+| `cascades.search(query, mode='text'|'similar')`        | POST /api/cascades/search                         | Keyword search or sub-index similarity over cascades. |
+| `cascades.semantic_search(query, k)`                   | POST /api/cascades/semantic-search                | FAISS → cascades whose articles match. |
+
+### Events sub-namespace — tier `researcher`
+
+Access via `ccf.events.<method>`. All methods require tier `researcher`.
+
+| Method                                              | HTTP                                                          | Description |
+|-----------------------------------------------------|---------------------------------------------------------------|-------------|
+| `events.summary()`                                  | GET /api/events/summary                                       | Cross-year event-cluster summary. |
+| `events.clusters(...)`                              | GET /api/events/clusters                                      | Filtered + paginated cluster list. Auto-paginates. |
+| `events.cluster(year, cluster_id)`                  | GET /api/events/clusters/&lt;y&gt;/&lt;id&gt;                 | Full cluster detail incl. occurrences. |
+| `events.cluster_articles(year, cluster_id)`         | GET /api/events/clusters/&lt;y&gt;/&lt;id&gt;/articles        | Articles attached to the cluster, grouped by occurrence. |
+| `events.type_network(year=None)`                    | GET /api/events/type-network                                  | Co-occurrence matrix between event types. |
+| `events.search(query, ...)`                         | GET /api/events/search                                        | Keyword search for clusters (FTS + entity match). |
+| `events.semantic_search(query, k)`                  | POST /api/events/semantic-search                              | FAISS → matching clusters. |
+
+### CSV export — tier `expert`
+
+| Method                                  | HTTP                              | Description |
+|-----------------------------------------|-----------------------------------|-------------|
+| `ccf.search_export(query, ...)`         | POST /api/search/export           | Server-side CSV export, parsed back into a DataFrame by default. |
+
+### Codebook (offline — no token, no network)
+
+| Method                                  | Description |
+|-----------------------------------------|-------------|
+| `ccf.codebook` (property)               | Full bundled codebook as a dict. |
+| `CCF.define(column)`                    | Operational definition of one annotation column. |
+| `CCF.codebook_dataframe()`              | Tidy DataFrame (column, group, subgroup, definition). |
+| `CCF.tier_required(method)`             | Minimum tier for a given client method, or None for offline. |
+| `CCF.methods_by_tier(tier, exact=...)`  | List methods callable at a tier. |
+| `subcategories_of(frame)`               | Subcategory column names for a frame. |
+| `define(column)`                        | Module-level alias of `CCF.define`. |
+| `FRAME_NAMES`, `FRAME_COLUMNS`, `MEDIA_OUTLETS`, `ALL_ANNOTATION_COLUMNS`, `LANGUAGES` | Convenience constants. |
+
+## Quick tour
 
 ### Time series and distributions
 
@@ -127,14 +231,6 @@ ccf.search_export('carbon tax', filters={'lang': 'en'},
 `search()` auto-paginates. Pass `limit=N` to cap, or `page_size=N` to
 tune the server page size. Set `raw=True` to get a dict with the raw
 rows + last response.
-
-### Articles
-
-```python
-art = ccf.article(123456)
-art['title'], art['media'], art['date']
-ccf.articles_batch([123456, 123457, 123458])  # metadata for many docs
-```
 
 ### Cascades — cross-year media bursts
 
@@ -202,5 +298,5 @@ to mock all HTTP traffic — no network or token needed.
 ## License
 
 MIT. Part of the Canadian Climate Framing research project — Antoine
-Lemorphic (Université de Sherbrooke), Tristan Boursier (Sciences Po
+Lemor (Université de Sherbrooke), Tristan Boursier (Sciences Po
 Paris & Université du Québec en Outaouais).
