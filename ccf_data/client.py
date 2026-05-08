@@ -52,6 +52,34 @@ def _drop_empty(d: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in d.items() if v not in (None, '', [])}
 
 
+def _norm_lang(value):
+    """Normalize a language value to the DB's uppercase form ('EN' / 'FR').
+
+    The CCF database stores language as uppercase 2-letter codes; clients
+    routinely pass 'en' / 'fr', so normalize quietly to avoid silent zero
+    results.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.upper() if len(value) == 2 else value
+    if isinstance(value, (list, tuple, set)):
+        return [_norm_lang(v) for v in value]
+    return value
+
+
+def _norm_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Normalize the `lang`/`language` keys of a filter dict in place."""
+    if not filters:
+        return {}
+    out = dict(filters)
+    if 'lang' in out:
+        out['lang'] = _norm_lang(out['lang'])
+    if 'language' in out:
+        out['language'] = _norm_lang(out['language'])
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Sub-namespaces (cascades, events) — exposed as `ccf.cascades` / `ccf.events`
 # ---------------------------------------------------------------------------
@@ -308,7 +336,7 @@ class CCF:
             raise CCFBadRequest("group_by must be one of: year, month, media, language")
         params = _drop_empty({
             'columns': ','.join(columns), 'group_by': group_by,
-            'lang': lang, 'media': media,
+            'lang': _norm_lang(lang), 'media': media,
             'date_from': date_from, 'date_to': date_to,
         })
         resp = self._http.get('/api/distribution', params=params)
@@ -323,29 +351,35 @@ class CCF:
         """
         params = _drop_empty({
             'frame': frame, 'date_from': date_from, 'date_to': date_to,
-            'media': media, 'language': language,
+            'media': media, 'language': _norm_lang(language),
         })
         return self._http.get('/api/subcategory-detail', params=params)
 
     def messenger_analysis(self, **filters):
-        return self._http.get('/api/messenger-analysis', params=_drop_empty(filters))
+        return self._http.get('/api/messenger-analysis',
+                              params=_drop_empty(_norm_filters(filters)))
 
     def event_analysis(self, **filters):
-        return self._http.get('/api/event-analysis', params=_drop_empty(filters))
+        return self._http.get('/api/event-analysis',
+                              params=_drop_empty(_norm_filters(filters)))
 
     def solution_analysis(self, **filters):
-        return self._http.get('/api/solution-analysis', params=_drop_empty(filters))
+        return self._http.get('/api/solution-analysis',
+                              params=_drop_empty(_norm_filters(filters)))
 
     def tone_trends(self, raw: bool = False, **filters):
-        rows = self._http.get('/api/tone-trends', params=_drop_empty(filters))
+        rows = self._http.get('/api/tone-trends',
+                              params=_drop_empty(_norm_filters(filters)))
         return _to_df(rows, raw=raw)
 
     def urgency_trends(self, raw: bool = False, **filters):
-        rows = self._http.get('/api/urgency-trends', params=_drop_empty(filters))
+        rows = self._http.get('/api/urgency-trends',
+                              params=_drop_empty(_norm_filters(filters)))
         return _to_df(rows, raw=raw)
 
     def canada_coverage(self, raw: bool = False, **filters):
-        rows = self._http.get('/api/canada-coverage', params=_drop_empty(filters))
+        rows = self._http.get('/api/canada-coverage',
+                              params=_drop_empty(_norm_filters(filters)))
         return _to_df(rows, raw=raw)
 
     def cross_tabulation(self, row_var: str, col_var: str,
@@ -398,7 +432,7 @@ class CCF:
         from ._pagination import _paginate_post
         body_template: Dict[str, Any] = {
             'query': query, 'mode': mode, 'level': level,
-            'filters': filters or {},
+            'filters': _norm_filters(filters),
             'filter_timing': filter_timing,
             'hybrid_weight': float(hybrid_weight),
         }
@@ -417,7 +451,7 @@ class CCF:
     def search_summary(self, query: str, filters: Optional[Dict[str, Any]] = None):
         """Aggregate stats for a search (year/media distribution, frame breakdown)."""
         return self._http.post('/api/search/summary',
-                               json={'query': query, 'filters': filters or {}})
+                               json={'query': query, 'filters': _norm_filters(filters)})
 
     def search_export(self, query: str, filters: Optional[Dict[str, Any]] = None,
                       columns: Optional[Sequence[str]] = None,
@@ -427,7 +461,7 @@ class CCF:
         """Server-side CSV export. Returns DataFrame by default; pass
         ``to_dataframe=False`` to get raw CSV bytes."""
         body = {
-            'query': query, 'filters': filters or {}, 'mode': mode,
+            'query': query, 'filters': _norm_filters(filters), 'mode': mode,
             'max_rows': int(max_rows),
             'include_search_params': include_search_params,
         }
@@ -452,11 +486,11 @@ class CCF:
     def cascade_xref(self, query: str, filters: Optional[Dict[str, Any]] = None):
         """Cascades whose articles overlap with this search query."""
         return self._http.post('/api/search/cascade-xref',
-                               json={'query': query, 'filters': filters or {}})
+                               json={'query': query, 'filters': _norm_filters(filters)})
 
     def event_xref(self, query: str, filters: Optional[Dict[str, Any]] = None):
         return self._http.post('/api/search/event-xref',
-                               json={'query': query, 'filters': filters or {}})
+                               json={'query': query, 'filters': _norm_filters(filters)})
 
     def semantic_search(self, query: str, k: int = 100_000, raw: bool = False):
         """FAISS dense semantic search (POST /api/semantic-search)."""
