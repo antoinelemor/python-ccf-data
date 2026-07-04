@@ -40,7 +40,7 @@ CCF(token='...', base_url='http://localhost:8005')
 
 ## API tiers
 
-The platform enforces five progressive tiers per token. The tier is
+The platform enforces six progressive tiers per token. The tier is
 assigned by an administrator when the token is created and dictates
 both *which* endpoints the token may call and *how many* requests it
 can issue per day.
@@ -52,6 +52,28 @@ can issue per day.
 | `researcher` |          20 000 |              1 000 |                 20 | + search/article/cascades/events/semantic             |
 | `expert`     |       unlimited |          unlimited |          unlimited | + CSV exports                                         |
 | `writer`     |       unlimited |          unlimited |          unlimited | + admin endpoints (internal tooling)                  |
+| `observer`   |       unlimited |          unlimited |          unlimited | + the real-time continuous feed (`corpus=continuous`/`all`) |
+
+### Corpus provenance (`corpus=`)
+
+Every data method accepts an optional `corpus` argument selecting which
+slice of the observatory to read:
+
+| Value          | Meaning                                                              |
+|----------------|----------------------------------------------------------------------|
+| `legacy`       | The frozen, citable corpus from the study (**default**, reproducible). |
+| `continuous`   | The continuously extracted real-time feed only.                      |
+| `all`          | Legacy + continuous combined.                                        |
+
+`legacy` is served to every tier. `continuous` and `all` require an
+`observer` token — other tiers get `403 corpus_forbidden`. Omitting the
+argument keeps the legacy default, so existing code is unchanged.
+
+```python
+ccf.summary()                       # legacy (default)
+ccf.search('carbon tax', corpus='all')      # needs observer tier
+ccf.distribution(['economic_frame'], corpus='continuous')
+```
 
 These quotas are stored per-token; an admin can override any of them.
 After every call the client stashes `tier`, `requests_remaining`,

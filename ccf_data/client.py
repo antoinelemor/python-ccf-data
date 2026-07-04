@@ -77,7 +77,28 @@ def _norm_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         out['lang'] = _norm_lang(out['lang'])
     if 'language' in out:
         out['language'] = _norm_lang(out['language'])
+    if 'corpus' in out:
+        out['corpus'] = _norm_corpus(out['corpus'])
     return out
+
+
+VALID_CORPORA = ('legacy', 'continuous', 'all')
+
+
+def _norm_corpus(value):
+    """Validate the corpus-provenance selector.
+
+    ``legacy`` (the frozen, citable corpus) is the server default and open to
+    every tier. ``continuous`` (the real-time extraction feed) and ``all``
+    (both) require an ``observer`` tier token — the server returns 403
+    otherwise. ``None`` is left untouched so the request omits the parameter.
+    """
+    if value is None:
+        return None
+    if value not in VALID_CORPORA:
+        raise CCFBadRequest(
+            f"corpus must be one of {VALID_CORPORA}, got {value!r}")
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -333,16 +354,21 @@ class CCF:
     # ------------------------------------------------------------------
     # Static / aggregate data (tier: metadata)
     # ------------------------------------------------------------------
-    def summary(self) -> Dict[str, Any]:
+    def summary(self, corpus: Optional[str] = None) -> Dict[str, Any]:
         """Corpus-level statistics: totals, date range, frames, annotation counts.
 
         Tier: ``metadata``. Hits ``GET /api/summary``.
+
+        ``corpus`` selects the provenance: ``'legacy'`` (default, frozen corpus),
+        ``'continuous'`` (real-time feed) or ``'all'`` — the last two need the
+        ``observer`` tier.
 
         >>> s = ccf.summary()
         >>> s['total_articles'], s['total_sentences']
         (266271, 9198958)
         """
-        return self._http.get('/api/summary')
+        return self._http.get('/api/summary',
+                              params=_drop_empty({'corpus': _norm_corpus(corpus)}))
 
     def schema(self) -> Dict[str, Any]:
         """Server-side annotation schema (frames, subcategories, columns,
@@ -360,31 +386,37 @@ class CCF:
         """
         return self._http.get('/api/geo-data')
 
-    def articles_by_year(self, raw: bool = False):
+    def articles_by_year(self, raw: bool = False, corpus: Optional[str] = None):
         """Article counts by year as a DataFrame (year, count).
 
         Tier: ``metadata``. Hits ``GET /api/articles-by-year``.
 
         Pass ``raw=True`` to receive the underlying list of dicts.
+        ``corpus``: see :py:meth:`summary`.
         """
-        rows = self._http.get('/api/articles-by-year')
+        rows = self._http.get('/api/articles-by-year',
+                              params=_drop_empty({'corpus': _norm_corpus(corpus)}))
         return _to_df(rows, raw=raw)
 
-    def articles_by_media(self, raw: bool = False):
+    def articles_by_media(self, raw: bool = False, corpus: Optional[str] = None):
         """Article counts by media outlet as a DataFrame (media, count).
 
         Tier: ``metadata``. Hits ``GET /api/articles-by-media``.
+        ``corpus``: see :py:meth:`summary`.
         """
-        rows = self._http.get('/api/articles-by-media')
+        rows = self._http.get('/api/articles-by-media',
+                              params=_drop_empty({'corpus': _norm_corpus(corpus)}))
         return _to_df(rows, raw=raw)
 
-    def frame_trends(self, raw: bool = False):
+    def frame_trends(self, raw: bool = False, corpus: Optional[str] = None):
         """Pre-computed monthly frame coverage (one row per month with
         per-frame counts).
 
         Tier: ``metadata``. Hits ``GET /api/frame-trends``.
+        ``corpus``: see :py:meth:`summary`.
         """
-        rows = self._http.get('/api/frame-trends')
+        rows = self._http.get('/api/frame-trends',
+                              params=_drop_empty({'corpus': _norm_corpus(corpus)}))
         return _to_df(rows, raw=raw)
 
     # ------------------------------------------------------------------
@@ -393,7 +425,7 @@ class CCF:
     def distribution(self, columns: Sequence[str], group_by: str = 'year',
                      lang: Optional[str] = None, media: Optional[str] = None,
                      date_from: Optional[str] = None, date_to: Optional[str] = None,
-                     raw: bool = False):
+                     raw: bool = False, corpus: Optional[str] = None):
         """Aggregate annotation counts grouped by year / month / media / language.
 
         Tier: ``analyst``. Hits ``GET /api/distribution``.
@@ -419,20 +451,23 @@ class CCF:
             'columns': ','.join(columns), 'group_by': group_by,
             'lang': _norm_lang(lang), 'media': media,
             'date_from': date_from, 'date_to': date_to,
+            'corpus': _norm_corpus(corpus),
         })
         resp = self._http.get('/api/distribution', params=params)
         return resp if raw else _to_df(resp.get('data', []))
 
     def subcategory_detail(self, frame: str, date_from: Optional[str] = None,
                            date_to: Optional[str] = None, media: Optional[str] = None,
-                           language: Optional[str] = None):
+                           language: Optional[str] = None, corpus: Optional[str] = None):
         """Totals + monthly trend for a frame's subcategories.
 
         Returns a dict with keys 'totals' and 'monthly_trend' (DataFrame-able).
+        ``corpus``: see :py:meth:`summary`.
         """
         params = _drop_empty({
             'frame': frame, 'date_from': date_from, 'date_to': date_to,
             'media': media, 'language': _norm_lang(language),
+            'corpus': _norm_corpus(corpus),
         })
         return self._http.get('/api/subcategory-detail', params=params)
 
@@ -464,11 +499,16 @@ class CCF:
         return _to_df(rows, raw=raw)
 
     def cross_tabulation(self, row_var: str, col_var: str,
-                         filters: Optional[Dict[str, Any]] = None):
-        """2x2 contingency table of two binary annotation columns."""
-        return self._http.post('/api/cross-tabulation', json={
+                         filters: Optional[Dict[str, Any]] = None,
+                         corpus: Optional[str] = None):
+        """2x2 contingency table of two binary annotation columns.
+
+        ``corpus``: see :py:meth:`summary`.
+        """
+        return self._http.post('/api/cross-tabulation', json=_drop_empty({
             'row_var': row_var, 'col_var': col_var, 'filters': filters or {},
-        })
+            'corpus': _norm_corpus(corpus),
+        }))
 
     # ------------------------------------------------------------------
     # Search (researcher tier)
@@ -478,7 +518,7 @@ class CCF:
                thresholds: Optional[List[Dict[str, Any]]] = None,
                filter_timing: str = 'pre', hybrid_weight: float = 0.5,
                page_size: int = 100, limit: Optional[int] = None,
-               raw: bool = False):
+               raw: bool = False, corpus: Optional[str] = None):
         """Unified search over the CCF corpus (``POST /api/search/advanced``).
 
         Tier: ``researcher``. This is the workhorse method — it covers
@@ -553,6 +593,8 @@ class CCF:
         }
         if thresholds:
             body_template['thresholds'] = thresholds
+        if _norm_corpus(corpus) is not None:
+            body_template['corpus'] = corpus
 
         rows, last = _paginate_post(
             self._http, '/api/search/advanced', body_template,
@@ -563,16 +605,21 @@ class CCF:
             return {'rows': rows, 'last_response': last}
         return _to_df(rows)
 
-    def search_summary(self, query: str, filters: Optional[Dict[str, Any]] = None):
-        """Aggregate stats for a search (year/media distribution, frame breakdown)."""
-        return self._http.post('/api/search/summary',
-                               json={'query': query, 'filters': _norm_filters(filters)})
+    def search_summary(self, query: str, filters: Optional[Dict[str, Any]] = None,
+                       corpus: Optional[str] = None):
+        """Aggregate stats for a search (year/media distribution, frame breakdown).
+
+        ``corpus``: see :py:meth:`summary`.
+        """
+        return self._http.post('/api/search/summary', json=_drop_empty({
+            'query': query, 'filters': _norm_filters(filters),
+            'corpus': _norm_corpus(corpus)}))
 
     def search_export(self, query: str, filters: Optional[Dict[str, Any]] = None,
                       columns: Optional[Sequence[str]] = None,
                       max_rows: int = 50_000, mode: str = 'text',
                       include_search_params: bool = False,
-                      to_dataframe: bool = True):
+                      to_dataframe: bool = True, corpus: Optional[str] = None):
         """Server-side CSV export of a search query. Returns a DataFrame by
         default; pass ``to_dataframe=False`` to get raw CSV bytes.
 
@@ -612,6 +659,8 @@ class CCF:
         }
         if columns:
             body['columns'] = list(columns)
+        if _norm_corpus(corpus) is not None:
+            body['corpus'] = corpus
         resp = self._http.post_raw('/api/search/export', json=body)
         if to_dataframe:
             import io
@@ -622,11 +671,15 @@ class CCF:
         return resp.content
 
     def threshold_filter(self, doc_ids: Sequence[int], column: str,
-                         min_pct: float = 0.3):
-        """Among `doc_ids`, return those whose AVG(column) ≥ `min_pct`."""
-        return self._http.post('/api/search/threshold-filter', json={
+                         min_pct: float = 0.3, corpus: Optional[str] = None):
+        """Among `doc_ids`, return those whose AVG(column) ≥ `min_pct`.
+
+        ``corpus``: see :py:meth:`summary`.
+        """
+        return self._http.post('/api/search/threshold-filter', json=_drop_empty({
             'doc_ids': list(doc_ids), 'column': column, 'min_pct': float(min_pct),
-        })
+            'corpus': _norm_corpus(corpus),
+        }))
 
     def cascade_xref(self, query: str, filters: Optional[Dict[str, Any]] = None):
         """Cascades whose articles overlap with this search query."""
@@ -637,20 +690,25 @@ class CCF:
         return self._http.post('/api/search/event-xref',
                                json={'query': query, 'filters': _norm_filters(filters)})
 
-    def semantic_search(self, query: str, k: int = 100_000, raw: bool = False):
-        """FAISS dense semantic search (POST /api/semantic-search)."""
-        resp = self._http.post('/api/semantic-search',
-                               json={'query': query, 'k': int(k)})
+    def semantic_search(self, query: str, k: int = 100_000, raw: bool = False,
+                        corpus: Optional[str] = None):
+        """FAISS dense semantic search (POST /api/semantic-search).
+
+        ``corpus``: see :py:meth:`summary`.
+        """
+        resp = self._http.post('/api/semantic-search', json=_drop_empty({
+            'query': query, 'k': int(k), 'corpus': _norm_corpus(corpus)}))
         return resp if raw else _to_df(resp.get('results', []))
 
     # ------------------------------------------------------------------
     # Articles (researcher tier)
     # ------------------------------------------------------------------
-    def article(self, doc_id: int) -> Dict[str, Any]:
+    def article(self, doc_id: int, corpus: Optional[str] = None) -> Dict[str, Any]:
         """Fetch a full article by ``doc_id``: metadata + every sentence +
         per-sentence annotation columns.
 
         Tier: ``researcher``. Hits ``GET /api/article/<doc_id>``.
+        ``corpus``: see :py:meth:`summary`.
 
         Viewer accounts (different from the tier system) have a per-account
         article-view quota; once exhausted, sentences come back with
@@ -661,18 +719,20 @@ class CCF:
         >>> art['title'], len(art['sentences'])
         ('Drive in Alberta...', 30)
         """
-        return self._http.get(f'/api/article/{int(doc_id)}')
+        return self._http.get(f'/api/article/{int(doc_id)}',
+                              params=_drop_empty({'corpus': _norm_corpus(corpus)}))
 
-    def articles_batch(self, doc_ids: Iterable[int], raw: bool = False):
+    def articles_batch(self, doc_ids: Iterable[int], raw: bool = False,
+                       corpus: Optional[str] = None):
         """Batch-fetch article metadata (without sentences) for a list of IDs.
 
         Tier: ``researcher``. Hits ``POST /api/articles/batch``. Returns a
         DataFrame with ``doc_id, title, media, date, author``. Much faster
         than N individual :py:meth:`article` calls when you only need
-        metadata.
+        metadata. ``corpus``: see :py:meth:`summary`.
         """
-        resp = self._http.post('/api/articles/batch',
-                               json={'doc_ids': [int(d) for d in doc_ids]})
+        resp = self._http.post('/api/articles/batch', json=_drop_empty({
+            'doc_ids': [int(d) for d in doc_ids], 'corpus': _norm_corpus(corpus)}))
         return resp if raw else _to_df(resp.get('articles', []))
 
     # ------------------------------------------------------------------

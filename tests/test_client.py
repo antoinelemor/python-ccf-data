@@ -85,3 +85,33 @@ def test_codebook_accessible_offline(ccf):
     # No HTTP needed — codebook is bundled.
     assert 'economic' in ccf.codebook['frames']
     assert ccf.define('eco_cost').startswith('Negative economic')
+
+
+@responses.activate
+def test_corpus_param_sent_on_get(ccf):
+    responses.add(responses.GET, f'{BASE}/api/summary', json={'total_articles': 1})
+    ccf.summary(corpus='all')
+    assert 'corpus=all' in responses.calls[0].request.url
+
+
+@responses.activate
+def test_corpus_param_sent_in_search_body(ccf):
+    import json
+    responses.add(responses.POST, f'{BASE}/api/search/advanced',
+                  json={'sentences': [], 'total': 0, 'page': 1, 'pages': 1})
+    ccf.search('carbon', corpus='continuous', page_size=10)
+    body = json.loads(responses.calls[0].request.body)
+    assert body['corpus'] == 'continuous'
+
+
+def test_corpus_invalid_rejected(ccf):
+    from ccf_data import CCFBadRequest
+    with pytest.raises(CCFBadRequest):
+        ccf.summary(corpus='bogus')
+
+
+@responses.activate
+def test_corpus_omitted_by_default(ccf):
+    responses.add(responses.GET, f'{BASE}/api/summary', json={'total_articles': 1})
+    ccf.summary()
+    assert 'corpus' not in responses.calls[0].request.url

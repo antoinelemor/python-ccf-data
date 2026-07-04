@@ -22,7 +22,7 @@ from .tiers import (
     tier_required, methods_by_tier, tier_at_least,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "CCF",
