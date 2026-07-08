@@ -9,9 +9,24 @@ from ccf_data import (
 
 
 def test_method_tiers_all_known():
-    """Every value in METHOD_TIERS is either a valid tier or None (offline)."""
-    valid = set(TIERS) | {None}
+    """Every value in METHOD_TIERS is a valid tier, 'public' (the live
+    observatory API, no token) or None (offline)."""
+    valid = set(TIERS) | {None, 'public'}
     assert all(t in valid for t in METHOD_TIERS.values())
+
+
+def test_live_methods_are_public():
+    """Every CCFLive endpoint method is registered as 'public', and every
+    'live.*' registry entry matches a real method on CCFLive."""
+    from ccf_data import CCFLive
+    live_methods = {n for n in dir(CCFLive)
+                    if not n.startswith('_') and callable(getattr(CCFLive, n))}
+    registered = {k.split('.', 1)[1] for k, v in METHOD_TIERS.items()
+                  if k.startswith('live.')}
+    assert registered == live_methods
+    assert all(v == 'public' for k, v in METHOD_TIERS.items()
+               if k.startswith('live.'))
+    assert tier_required('live.latest_events') == 'public'
 
 
 def test_tier_required_for_core_methods():
@@ -54,5 +69,6 @@ def test_ccf_static_methods_match_module_helpers():
 
 
 def test_tier_descriptions_are_complete():
-    assert set(TIER_DESCRIPTIONS) == set(TIERS)
+    # Every token tier described + the extra 'public' pseudo-tier (live API).
+    assert set(TIER_DESCRIPTIONS) == set(TIERS) | {'public'}
     assert all(isinstance(v, str) and v for v in TIER_DESCRIPTIONS.values())

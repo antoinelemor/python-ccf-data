@@ -39,6 +39,9 @@ TIER_DESCRIPTIONS: Dict[str, str] = {
     'researcher': 'Search the corpus, fetch full articles, browse cascades and event clusters.',
     'expert':     'Unlimited search and CSV exports for offline analysis.',
     'writer':     'Full access (admin/maintainer-equivalent).',
+    # Not a token tier: the live observatory API is public and unauthenticated.
+    'public':     'Live observatory (ccf.live / CCFLive) — public real-time API, '
+                  'no token required.',
 }
 
 
@@ -112,6 +115,41 @@ METHOD_TIERS: Dict[str, str] = {
     'events.search':              'researcher',
     'events.semantic_search':     'researcher',
 
+    # Live observatory namespace — PUBLIC real-time API (no token at all):
+    # https://ccf-project.ca/api. Any tier (and no tier) can call these.
+    'live.latest_events':         'public',
+    'live.ongoing_events':        'public',
+    'live.event':                 'public',
+    'live.search_events':         'public',
+    'live.recent_cascades':       'public',
+    'live.cascade':               'public',
+    'live.cascade_summary':       'public',
+    'live.search_cascades':       'public',
+    'live.latest_articles':       'public',
+    'live.latest_classified':     'public',
+    'live.article':               'public',
+    'live.articles_timeline':     'public',
+    'live.search_titles':         'public',
+    'live.geo_data':              'public',
+    'live.province_panels':       'public',
+    'live.frames_by_province':    'public',
+    'live.media_panels':          'public',
+    'live.media_coverage':        'public',
+    'live.frames_by_media':       'public',
+    'live.articles_by_media':     'public',
+    'live.articles_by_month':     'public',
+    'live.frames_national':       'public',
+    'live.frames_data':           'public',
+    'live.tone_over_time':        'public',
+    'live.category_distribution': 'public',
+    'live.network_data':          'public',
+    'live.annotation_metrics':    'public',
+    'live.daily_brief':           'public',
+    'live.overview_summary':      'public',
+    'live.observatory_summary':   'public',
+    'live.observatory_stats':     'public',
+    'live.stats':                 'public',
+
     # Local helpers — no tier required (no HTTP call)
     'define':                     None,
     'codebook':                   None,
@@ -156,10 +194,15 @@ def methods_by_tier(tier: str, *, exact: bool = False) -> List[str]:
     False
     >>> 'search_export' in methods_by_tier('expert')
     True
+    >>> 'live.latest_events' in methods_by_tier('metadata')   # public: any tier
+    True
+    >>> methods_by_tier('public', exact=True)[0].startswith('live.')
+    True
     """
-    if tier not in TIER_RANK:
-        raise ValueError(f"Unknown tier {tier!r}. Valid tiers: {list(TIERS)}")
-    rank = TIER_RANK[tier]
+    if tier != 'public' and tier not in TIER_RANK:
+        raise ValueError(f"Unknown tier {tier!r}. "
+                         f"Valid tiers: {list(TIERS) + ['public']}")
+    rank = TIER_RANK.get(tier, -1)
     out = []
     for name, t in METHOD_TIERS.items():
         if t is None:
@@ -168,11 +211,17 @@ def methods_by_tier(tier: str, *, exact: bool = False) -> List[str]:
             if t == tier:
                 out.append(name)
         else:
-            if TIER_RANK[t] <= rank:
+            # 'public' methods are callable from any tier (and no tier at all).
+            if t == 'public' or (tier != 'public' and TIER_RANK[t] <= rank):
                 out.append(name)
     return sorted(out)
 
 
 def tier_at_least(token_tier: str, required: str) -> bool:
-    """Return True if `token_tier` is privileged enough for `required`."""
+    """Return True if `token_tier` is privileged enough for `required`.
+
+    ``required='public'`` is always satisfied (the live observatory API
+    needs no token at all)."""
+    if required == 'public':
+        return True
     return TIER_RANK.get(token_tier, -1) >= TIER_RANK.get(required, 999)
