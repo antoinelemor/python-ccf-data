@@ -16,7 +16,7 @@ from .exceptions import (
 
 DEFAULT_BASE_URL = "https://data.ccf-project.ca"
 DEFAULT_TIMEOUT = 60  # seconds — server-side queries can be slow on 9.2M rows
-DEFAULT_USER_AGENT = "ccf-data-python/0.2.0"
+DEFAULT_USER_AGENT = "ccf-data-python/0.3.0"
 
 
 @dataclass

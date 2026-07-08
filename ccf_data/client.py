@@ -311,6 +311,10 @@ class CCF:
         self._http = _HTTP(token, base_url=base_url, timeout=timeout)
         self.cascades = _Cascades(self._http)
         self.events = _Events(self._http)
+        # Public real-time observatory API (no token, separate base URL):
+        # live events/cascades/articles WITH their bilingual LLM summaries.
+        from .live import CCFLive
+        self.live = CCFLive()
         # The codebook is a class-level constant — also expose on instance.
         self.codebook = _schema.CODEBOOK
 

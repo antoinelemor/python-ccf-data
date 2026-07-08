@@ -199,6 +199,45 @@ Access via `ccf.events.<method>`. All methods require tier `researcher`.
 |-----------------------------------------|-----------------------------------|-------------|
 | `ccf.search_export(query, ...)`         | POST /api/search/export           | Server-side CSV export, parsed back into a DataFrame by default. |
 
+### Live observatory — public, **no token required**
+
+The CCF observatory (https://ccf-project.ca/observatory) continuously
+extracts, annotates and summarises Canadian climate coverage. Its public
+read-only API is wrapped by the `CCFLive` client — also mounted on the main
+client as `ccf.live`. Events, cascades and articles carry their **bilingual
+LLM summaries** (`summary_en` / `summary_fr`, stamped `generated_at`).
+
+```python
+from ccf_data import CCFLive
+live = CCFLive()                          # no token needed
+live.latest_events(limit=20)              # events + summaries EN/FR
+live.article(275849)['summary_fr']        # LLM summary of one article
+live.articles_timeline(days=15)           # day×outlet timeline + frame profiles
+live.daily_brief()                        # {'en': ..., 'fr': ...}
+```
+
+| Method | HTTP | Description |
+|---|---|---|
+| `live.latest_events(limit, min_media)` | GET /api/latest-events | Latest detected events + titles/summaries EN-FR, strength, key articles. |
+| `live.ongoing_events()` | GET /api/ongoing-events | Events detected today/yesterday. |
+| `live.event(event_key)` | GET /api/event/{key} | Full event profile (articles, entities, summaries). |
+| `live.search_events(q)` | GET /api/search-events | Full-text search over event titles + summaries. |
+| `live.recent_cascades(limit)` | GET /api/recent-cascades | Recent cascades + frame, z-score, summaries EN-FR. |
+| `live.cascade(cascade_id)` | GET /api/cascade/{id} | Full cascade profile. |
+| `live.cascade_summary()` | GET /api/cascade-summary | Aggregate cascade statistics. |
+| `live.search_cascades(q)` | GET /api/search-cascades | Full-text search over cascade titles + summaries. |
+| `live.latest_articles()` / `live.latest_classified()` | GET /api/latest-articles, /latest-classified | Freshest extracted / fully-classified articles + summaries. |
+| `live.article(doc_id)` | GET /api/article/{id} | Metadata, province, 8-frame profile, entities, related events/cascades, summaries. |
+| `live.articles_timeline(days)` | GET /api/articles-timeline | Day-by-day, outlet-by-outlet timeline (≤60 days). |
+| `live.search_titles(q)` | GET /api/search-titles | Full-text search over live-corpus titles. |
+| `live.geo_data()` / `live.province_panels()` / `live.frames_by_province()` | GET /api/geo-data, … | Provinces: volumes, outlets, LLM briefs, frame shares. |
+| `live.media_panels()` / `live.media_coverage()` / `live.frames_by_media()` / `live.articles_by_media()` / `live.articles_by_month()` | GET /api/media-panels, … | Outlets: panels, freshness, frame shares, volumes. |
+| `live.frames_national()` / `live.frames_data()` / `live.tone_over_time()` / `live.category_distribution()` / `live.network_data()` / `live.annotation_metrics()` | GET /api/frames-national, … | National trends, tone, categories, entity network, model metrics. |
+| `live.daily_brief()` / `live.overview_summary()` / `live.observatory_summary()` / `live.observatory_stats()` / `live.stats()` | GET /api/daily-brief, … | LLM editorial briefs + observatory/site statistics. |
+
+> The live corpus (`continuous`) is refreshed several times a day and is
+> **not frozen** — cite the `legacy` corpus (authenticated API) in papers.
+
 ### Codebook (offline — no token, no network)
 
 | Method                                  | Description |

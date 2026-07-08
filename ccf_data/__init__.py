@@ -7,6 +7,7 @@
 """
 
 from .client import CCF
+from .live import CCFLive
 from .exceptions import (
     CCFError, CCFAuthError, CCFTierError, CCFQuotaError,
     CCFNotFound, CCFServerError, CCFBadRequest,
@@ -22,10 +23,10 @@ from .tiers import (
     tier_required, methods_by_tier, tier_at_least,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
-    "CCF",
+    "CCF", "CCFLive",
     "CCFError", "CCFAuthError", "CCFTierError", "CCFQuotaError",
     "CCFNotFound", "CCFServerError", "CCFBadRequest",
     "CODEBOOK", "FRAME_NAMES", "FRAME_COLUMNS", "ALL_FRAME_SUBCATEGORIES",
