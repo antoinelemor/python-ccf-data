@@ -1,11 +1,22 @@
-# ccf-data — Python client for the Canadian Climate Framing API
+<div align="center">
 
-Authenticated, DataFrame-friendly access to the Canadian Climate Framing
-(CCF) data platform: a corpus of ~250,000 Canadian newspaper articles
-(1978–2024), 9.2 M sentences, and 67 climate-coverage annotations
-(framings, messengers, events, solutions, tone, named entities).
+<a href="https://ccf-project.ca">
+  <img src="https://ccf-project.ca/static/assets/logos/ccf_icone.png" alt="Canadian Climate Framing" width="130">
+</a>
 
-Live API: <https://data.ccf-project.ca>
+# ccf-data · Python client
+
+**Authenticated, DataFrame-friendly access to the [CCF data platform](https://data.ccf-project.ca): 275,000+ Canadian newspaper articles (1978 to present, updated daily), 9.2 M sentences and 67 climate-coverage annotations.**
+
+*A lighthouse on Canada's climate coverage*
+
+[![Website](https://img.shields.io/badge/Website-ccf--project.ca-0f8a76?style=flat-square)](https://ccf-project.ca)
+[![Live observatory](https://img.shields.io/badge/Live-observatory-12b48c?style=flat-square)](https://ccf-project.ca/observatory)
+[![Data platform](https://img.shields.io/badge/Data-data.ccf--project.ca-0e2a47?style=flat-square)](https://data.ccf-project.ca)
+
+</div>
+
+---
 
 ## Installation
 
